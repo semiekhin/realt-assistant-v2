@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 API_BASE = "https://api-ru.ygroup.ru/v2"
+API_BASE_V1 = "https://api-ru.ygroup.ru/v1"
 API_TOKEN = os.getenv("YGROUP_API_TOKEN", "")
 
 # Кэш всех ЖК
@@ -90,33 +91,26 @@ def search_facilities(query: str) -> List[Dict]:
 
 
 def get_facility(facility_id: str) -> Optional[Dict]:
-    """Получить детали ЖК"""
-    try:
-        resp = requests.get(
-            f"{API_BASE}/facilities/{facility_id}",
-            headers=get_headers(),
-            timeout=10
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        return data.get("data")
-    except Exception as e:
-        print(f"[YGROUP] get_facility error: {e}")
-        return None
+    """Получить ЖК из кэша по ID"""
+    all_facilities = _load_all_facilities()
+    for f in all_facilities:
+        if f.get("id") == facility_id:
+            return f
+    return None
 
 
 def get_clusters(facility_id: str) -> List[Dict]:
     """Получить корпуса ЖК"""
     try:
         resp = requests.get(
-            f"{API_BASE}/clusters",
+            f"{API_BASE_V1}/clusters",
             headers=get_headers(),
             params={"facility_id": facility_id},
             timeout=10
         )
         resp.raise_for_status()
         data = resp.json()
-        return data.get("data", [])
+        return data.get("data", {}).get("clusters", [])
     except Exception as e:
         print(f"[YGROUP] get_clusters error: {e}")
         return []
@@ -126,14 +120,14 @@ def get_lots(cluster_id: str) -> List[Dict]:
     """Получить лоты корпуса"""
     try:
         resp = requests.get(
-            f"{API_BASE}/lots",
+            f"{API_BASE_V1}/lots",
             headers=get_headers(),
             params={"cluster_id": cluster_id},
             timeout=30
         )
         resp.raise_for_status()
         data = resp.json()
-        return data.get("data", [])
+        return data.get("data", {}).get("lots", [])
     except Exception as e:
         print(f"[YGROUP] get_lots error: {e}")
         return []

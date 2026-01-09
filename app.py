@@ -138,7 +138,7 @@ async def handle_callback(callback: dict):
         await handle_add_property(send_message, edit_message, user_id, message_id)
     
     elif data.startswith("import_facility:"):
-        facility_id = int(data.split(":")[1])
+        facility_id = data.split(":")[1]
         await handle_import_facility(send_message, edit_message, user_id, facility_id, message_id)
     
     # Меню ЖК
