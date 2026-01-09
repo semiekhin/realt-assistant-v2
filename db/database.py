@@ -54,7 +54,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS properties (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
-            ygroup_facility_id INTEGER,
+            ygroup_facility_id TEXT,
             name TEXT NOT NULL,
             city TEXT,
             district TEXT,
@@ -75,7 +75,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS buildings (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             property_id INTEGER NOT NULL,
-            ygroup_cluster_id INTEGER,
+            ygroup_cluster_id TEXT,
             name TEXT,
             number INTEGER,
             floors_count INTEGER,
@@ -93,7 +93,7 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             property_id INTEGER NOT NULL,
             building_id INTEGER,
-            ygroup_lot_id INTEGER,
+            ygroup_lot_id TEXT,
             code TEXT NOT NULL,
             building INTEGER,
             floor INTEGER,

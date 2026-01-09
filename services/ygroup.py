@@ -1,8 +1,6 @@
 """
 YGroup API Client
 https://api-ru.ygroup.ru/v2/
-
-Загрузка данных ЖК: facilities → clusters → lots
 """
 
 import os
@@ -10,9 +8,16 @@ import re
 import requests
 from typing import Optional, List, Dict, Any
 from datetime import datetime
+from dotenv import load_dotenv
+
+load_dotenv()
 
 API_BASE = "https://api-ru.ygroup.ru/v2"
 API_TOKEN = os.getenv("YGROUP_API_TOKEN", "")
+
+# Кэш всех ЖК
+_facilities_cache: List[Dict] = []
+_cache_loaded = False
 
 
 def get_headers() -> Dict[str, str]:
@@ -22,85 +27,112 @@ def get_headers() -> Dict[str, str]:
     }
 
 
-# === API Requests ===
+def _load_all_facilities() -> List[Dict]:
+    """Загрузить все ЖК (с пагинацией)"""
+    global _facilities_cache, _cache_loaded
+    
+    if _cache_loaded:
+        return _facilities_cache
+    
+    all_posts = []
+    page = 1
+    
+    while True:
+        try:
+            resp = requests.get(
+                f"{API_BASE}/facilities",
+                headers=get_headers(),
+                params={"types": 6, "per_page": 100, "page": page},
+                timeout=30
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            posts = data.get("data", {}).get("facility_posts", [])
+            
+            if not posts:
+                break
+            
+            all_posts.extend(posts)
+            
+            meta = data.get("data", {}).get("meta", {})
+            total = meta.get("total", 0)
+            
+            if len(all_posts) >= total:
+                break
+            
+            page += 1
+            
+        except Exception as e:
+            print(f"[YGROUP] _load_all_facilities page {page} error: {e}")
+            break
+    
+    _facilities_cache = all_posts
+    _cache_loaded = True
+    print(f"[YGROUP] Loaded {len(all_posts)} facilities")
+    
+    return all_posts
 
-def search_facilities(query: str, city_id: int = None) -> List[Dict]:
-    """
-    Поиск ЖК по названию
-    types=6 — жилые комплексы
-    """
-    try:
-        params = {"types": 6}
-        if city_id:
-            params["city_id"] = city_id
-        
-        response = requests.get(
-            f"{API_BASE}/facilities",
-            headers=get_headers(),
-            params=params,
-            timeout=10
-        )
-        response.raise_for_status()
-        data = response.json()
-        
-        facilities = data.get("data", [])
-        
-        # Фильтруем по query
-        if query:
-            query_lower = query.lower()
-            facilities = [f for f in facilities if query_lower in f.get("name", "").lower()]
-        
-        return facilities[:20]  # Максимум 20 результатов
-        
-    except Exception as e:
-        print(f"[YGROUP] search_facilities error: {e}")
-        return []
+
+def search_facilities(query: str) -> List[Dict]:
+    """Поиск ЖК по названию"""
+    all_facilities = _load_all_facilities()
+    
+    if not query:
+        return all_facilities[:20]
+    
+    query_lower = query.lower()
+    results = [
+        f for f in all_facilities 
+        if query_lower in f.get("name", "").lower()
+    ]
+    
+    return results[:20]
 
 
-def get_facility(facility_id: int) -> Optional[Dict]:
+def get_facility(facility_id: str) -> Optional[Dict]:
     """Получить детали ЖК"""
     try:
-        response = requests.get(
+        resp = requests.get(
             f"{API_BASE}/facilities/{facility_id}",
             headers=get_headers(),
             timeout=10
         )
-        response.raise_for_status()
-        data = response.json()
+        resp.raise_for_status()
+        data = resp.json()
         return data.get("data")
     except Exception as e:
         print(f"[YGROUP] get_facility error: {e}")
         return None
 
 
-def get_clusters(facility_id: int) -> List[Dict]:
+def get_clusters(facility_id: str) -> List[Dict]:
     """Получить корпуса ЖК"""
     try:
-        response = requests.get(
+        resp = requests.get(
             f"{API_BASE}/clusters",
             headers=get_headers(),
             params={"facility_id": facility_id},
             timeout=10
         )
-        response.raise_for_status()
-        data = response.json()
+        resp.raise_for_status()
+        data = resp.json()
         return data.get("data", [])
     except Exception as e:
         print(f"[YGROUP] get_clusters error: {e}")
         return []
 
 
-def get_lots(cluster_id: int) -> List[Dict]:
-    """Получить лоты (квартиры) корпуса"""
+def get_lots(cluster_id: str) -> List[Dict]:
+    """Получить лоты корпуса"""
     try:
-        response = requests.get(
+        resp = requests.get(
             f"{API_BASE}/lots",
             headers=get_headers(),
             params={"cluster_id": cluster_id},
             timeout=30
         )
-        response.raise_for_status()
-        data = response.json()
+        resp.raise_for_status()
+        data = resp.json()
         return data.get("data", [])
     except Exception as e:
         print(f"[YGROUP] get_lots error: {e}")
@@ -110,62 +142,36 @@ def get_lots(cluster_id: int) -> List[Dict]:
 # === Data Transformation ===
 
 def extract_building_number(name: str) -> int:
-    """
-    Извлечь номер корпуса из названия
-    "Корпус 1" → 1
-    "Family" → 1
-    "Business" → 2
-    """
     if not name:
         return 1
-    
-    # Ищем цифру
     match = re.search(r'\d+', name)
     if match:
         return int(match.group())
-    
-    # Известные названия
     name_lower = name.lower()
     if "family" in name_lower:
         return 1
     if "business" in name_lower:
         return 2
-    
     return 1
 
 
 def quarter_to_timestamp(quarter: int, year: int) -> int:
-    """
-    Конвертировать квартал в Unix timestamp
-    Q1 → 1 марта, Q2 → 1 июня, Q3 → 1 сентября, Q4 → 1 декабря
-    """
     month = {1: 3, 2: 6, 3: 9, 4: 12}.get(quarter, 12)
     dt = datetime(year, month, 1)
     return int(dt.timestamp())
 
 
 def generate_lot_code(lot: Dict, building_number: int) -> str:
-    """
-    Сгенерировать код лота
-    "№ 207" + корпус 1 → "А207"
-    "№ 207" + корпус 2 → "В207"
-    """
-    # Буквы для корпусов
     building_letters = {1: "А", 2: "В", 3: "С", 4: "D", 5: "E"}
     letter = building_letters.get(building_number, "А")
-    
-    # Извлекаем номер из "№ 207"
     lot_name = lot.get("name", "")
     match = re.search(r'\d+', lot_name)
     if match:
-        number = match.group()
-        return f"{letter}{number}"
-    
+        return f"{letter}{match.group()}"
     return f"{letter}{lot.get('id', 0)}"
 
 
 def transform_facility(facility: Dict) -> Dict:
-    """Преобразовать facility в формат properties"""
     return {
         "ygroup_facility_id": facility.get("id"),
         "name": facility.get("name", ""),
@@ -181,19 +187,14 @@ def transform_facility(facility: Dict) -> Dict:
 
 
 def transform_cluster(cluster: Dict, property_id: int) -> Dict:
-    """Преобразовать cluster в формат buildings"""
     number = extract_building_number(cluster.get("name", ""))
-    
     commissioning_date = None
     commissioning_timestamp = None
-    
     year = cluster.get("commissioning_year")
     quarter = cluster.get("commissioning_quarter")
-    
     if year and quarter:
         commissioning_date = f"Q{quarter} {year}"
         commissioning_timestamp = quarter_to_timestamp(quarter, year)
-    
     return {
         "property_id": property_id,
         "ygroup_cluster_id": cluster.get("id"),
@@ -207,21 +208,15 @@ def transform_cluster(cluster: Dict, property_id: int) -> Dict:
 
 
 def transform_lot(lot: Dict, property_id: int, building_id: int, building_number: int) -> Dict:
-    """Преобразовать lot в формат units"""
     code = generate_lot_code(lot, building_number)
-    
-    # Этаж из position
     floor = None
     position = lot.get("position", {})
     if isinstance(position, dict):
         floor = position.get("vertical_position")
-    
-    # Планировка
     layout_url = None
     layout_images = lot.get("layout_images", [])
-    if layout_images and len(layout_images) > 0:
+    if layout_images:
         layout_url = layout_images[0]
-    
     return {
         "property_id": property_id,
         "building_id": building_id,
@@ -229,7 +224,7 @@ def transform_lot(lot: Dict, property_id: int, building_id: int, building_number
         "code": code,
         "building": building_number,
         "floor": floor,
-        "rooms": lot.get("layout_type"),  # комнатность
+        "rooms": lot.get("layout_type"),
         "area_m2": lot.get("area_m2"),
         "price_rub": lot.get("total_price"),
         "price_per_m2": lot.get("price_per_m2"),
@@ -239,21 +234,8 @@ def transform_lot(lot: Dict, property_id: int, building_id: int, building_number
     }
 
 
-# === Import Functions ===
-
-def import_facility(user_id: int, facility_id: int) -> Dict[str, Any]:
-    """
-    Импортировать ЖК со всеми корпусами и лотами
-    
-    Returns:
-        {
-            "success": True/False,
-            "property_id": int,
-            "buildings_count": int,
-            "units_count": int,
-            "error": str (если ошибка)
-        }
-    """
+def import_facility(user_id: int, facility_id: str) -> Dict[str, Any]:
+    """Импортировать ЖК со всеми корпусами и лотами"""
     from db.database import (
         create_property, create_building, create_unit,
         update_property_stats, set_property_custom
@@ -278,7 +260,7 @@ def import_facility(user_id: int, facility_id: int) -> Dict[str, Any]:
     property_id = create_property(user_id, property_data)
     result["property_id"] = property_id
     
-    # 3. Создаём дефолтные кастомные данные
+    # 3. Дефолтные кастомные данные
     set_property_custom(property_id, {
         "appreciation_rate": 10,
         "occupancy_rate": 70,
@@ -291,42 +273,20 @@ def import_facility(user_id: int, facility_id: int) -> Dict[str, Any]:
     clusters = get_clusters(facility_id)
     
     for cluster in clusters:
-        # 5. Создаём building
         building_data = transform_cluster(cluster, property_id)
         building_id = create_building(property_id, building_data)
         building_number = building_data["number"]
         result["buildings_count"] += 1
         
-        # 6. Получаем лоты корпуса
+        # Лоты корпуса
         lots = get_lots(cluster["id"])
-        
         for lot in lots:
-            # 7. Создаём unit
             unit_data = transform_lot(lot, property_id, building_id, building_number)
             create_unit(property_id, building_id, unit_data)
             result["units_count"] += 1
     
-    # 8. Обновляем статистику
     update_property_stats(property_id)
-    
     result["success"] = True
     print(f"[YGROUP] Imported: {property_data['name']} — {result['buildings_count']} buildings, {result['units_count']} units")
     
     return result
-
-
-# === Test ===
-
-if __name__ == "__main__":
-    print("=== YGroup API Test ===\n")
-    
-    # Тест поиска
-    print("Поиск 'RIZALTA':")
-    facilities = search_facilities("RIZALTA")
-    for f in facilities[:3]:
-        print(f"  {f['id']}: {f['name']} — {f.get('city_name', '?')}")
-    
-    print("\nПоиск 'Солнечный':")
-    facilities = search_facilities("Солнечный")
-    for f in facilities[:3]:
-        print(f"  {f['id']}: {f['name']} — {f.get('city_name', '?')}")
