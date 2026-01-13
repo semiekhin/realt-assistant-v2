@@ -26,6 +26,8 @@ from handlers.search import (
     handle_search_code_start, handle_search_code
 )
 from handlers.lot_menu import handle_lot_menu, handle_lot_from_miniapp
+from handlers.calc_roi import handle_roi
+from handlers.calc_compare import handle_compare, handle_compare_years
 from db.database import get_user_state
 from config.settings import States
 
@@ -192,10 +194,19 @@ async def handle_callback(callback: dict):
         await edit_message(user_id, message_id, "🚧 КП — в разработке", "HTML")
     
     elif data.startswith("roi:"):
-        await edit_message(user_id, message_id, "🚧 ROI — в разработке", "HTML")
+        parts = data.split(":")
+        property_id, code = int(parts[1]), parts[2]
+        await handle_roi(edit_message, user_id, property_id, code, message_id)
+    
+    elif data.startswith("compare_years:"):
+        parts = data.split(":")
+        property_id, code, years = int(parts[1]), parts[2], int(parts[3])
+        await handle_compare_years(edit_message, user_id, property_id, code, years, message_id)
     
     elif data.startswith("compare:"):
-        await edit_message(user_id, message_id, "🚧 Сравнение — в разработке", "HTML")
+        parts = data.split(":")
+        property_id, code = int(parts[1]), parts[2]
+        await handle_compare(edit_message, user_id, property_id, code, message_id)
     
     elif data.startswith("ai:"):
         await edit_message(user_id, message_id, "🚧 AI — в разработке", "HTML")

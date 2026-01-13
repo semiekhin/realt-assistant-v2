@@ -47,9 +47,15 @@ async def main():
                 
                 try:
                     if "message" in update:
+                        text = update["message"].get("text", "")[:30]
+                        print(f"[MSG] {text}")
                         await handle_message(update["message"])
+                        print(f"[MSG] Done")
                     elif "callback_query" in update:
+                        data = update["callback_query"].get("data", "")
+                        print(f"[CB] {data}")
                         await handle_callback(update["callback_query"])
+                        print(f"[CB] Done")
                 except Exception as e:
                     print(f"[ERROR] Handler: {e}")
         

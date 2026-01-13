@@ -88,19 +88,101 @@ async def handle_about_property(edit_message, user_id: int, property_id: int, me
     text = f"ℹ️ <b>О проекте: {prop['name']}</b>\n\n"
     
     # Локация
-    if prop.get("city") or prop.get("district") or prop.get("address"):
-        text += "<b>📍 Локация:</b>\n"
+    text += "<b>📍 Локация:</b>\n"
+    if prop.get("address"):
+        text += f"{prop['address']}\n"
+    else:
+        parts = []
         if prop.get("city"):
-            text += f"Город: {prop['city']}\n"
+            parts.append(prop["city"])
         if prop.get("district"):
-            text += f"Район: {prop['district']}\n"
-        if prop.get("address"):
-            text += f"Адрес: {prop['address']}\n"
+            parts.append(prop["district"])
+        if parts:
+            text += f"{', '.join(parts)}\n"
+    text += "\n"
+    
+    # Характеристики
+    chars = []
+    if prop.get("facility_subtype"):
+        chars.append(f"Тип: {prop['facility_subtype']}")
+    if prop.get("facility_class"):
+        chars.append(f"Класс: {prop['facility_class']}")
+    if prop.get("territory_type"):
+        chars.append(f"Территория: {prop['territory_type']}")
+    if prop.get("parking_types"):
+        chars.append(f"Парковка: {prop['parking_types']}")
+    
+    if chars:
+        text += "<b>🏠 Характеристики:</b>\n"
+        for c in chars:
+            text += f"• {c}\n"
         text += "\n"
     
-    # Застройщик
-    if prop.get("developer"):
-        text += f"<b>🏗 Застройщик:</b> {prop['developer']}\n\n"
+    # Сдача
+    if prop.get("is_commissioned"):
+        text += "<b>🔑 Статус:</b> Сдан ✅\n\n"
+    elif prop.get("commissioning_year"):
+        q = prop.get("commissioning_quarter", "")
+        year = prop["commissioning_year"]
+        text += f"<b>🔑 Сдача:</b> Q{q} {year}\n\n"
+    
+    # Коммуникации
+    comms = []
+    if prop.get("has_gas"):
+        comms.append("Газ ✅")
+    if prop.get("has_electricity"):
+        comms.append("Электричество ✅")
+    if prop.get("heating_type"):
+        comms.append(f"Отопление: {prop['heating_type']}")
+    if prop.get("water_supply_type"):
+        comms.append(f"Вода: {prop['water_supply_type']}")
+    if prop.get("sewerage_type"):
+        comms.append(f"Канализация: {prop['sewerage_type']}")
+    
+    if comms:
+        text += "<b>🔌 Коммуникации:</b>\n"
+        for c in comms:
+            text += f"• {c}\n"
+        text += "\n"
+    
+    # Оформление и оплата
+    payment_info = []
+    if prop.get("contract_type"):
+        payment_info.append(f"Оформление: {prop['contract_type']}")
+    if prop.get("payment_methods"):
+        payment_info.append(f"Оплата: {prop['payment_methods']}")
+    if prop.get("commission_percent"):
+        pct = prop["commission_percent"] * 100
+        payment_info.append(f"Комиссия: {pct:.0f}%")
+    if prop.get("fz214"):
+        payment_info.append("ФЗ-214 ✅")
+    
+    if payment_info:
+        text += "<b>💳 Оформление:</b>\n"
+        for p in payment_info:
+            text += f"• {p}\n"
+        text += "\n"
+    
+    # Площади и цены
+    price_info = []
+    area_parts = []
+    if prop.get("min_area_m2"):
+        area_parts.append(f"{prop['min_area_m2']:.1f}")
+    if prop.get("max_area_m2"):
+        area_parts.append(f"{prop['max_area_m2']:.1f}")
+    if area_parts:
+        price_info.append(f"Площади: {' - '.join(area_parts)} м²")
+    
+    if prop.get("min_price_per_m2"):
+        price_info.append(f"Цена за м²: от {format_price(prop['min_price_per_m2'])}")
+    if prop.get("min_price"):
+        price_info.append(f"Мин. цена: от {format_price(prop['min_price'])}")
+    
+    if price_info:
+        text += "<b>💰 Цены:</b>\n"
+        for p in price_info:
+            text += f"• {p}\n"
+        text += "\n"
     
     # Описание
     if prop.get("description"):

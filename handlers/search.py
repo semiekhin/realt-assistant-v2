@@ -60,7 +60,12 @@ def build_floors_keyboard(property_id: int, building: int, floors: list) -> dict
 def build_units_keyboard(property_id: int, units: list, back_callback: str) -> dict:
     keyboard = []
     for u in units:
-        label = f"{u['code']} • {format_rooms(u['rooms'])} • {format_area(u['area_m2'])} • {format_price(u['price_rub'])}"
+        status_icon = ""
+        if u.get("status") == "booked":
+            status_icon = "🔒 "
+        elif u.get("status") == "sold":
+            status_icon = "❌ "
+        label = f"{status_icon}{u['code']} • {format_rooms(u['rooms'])} • {format_area(u['area_m2'])} • {format_price(u['price_rub'])}"
         keyboard.append([{
             "text": label,
             "callback_data": f"lot:{property_id}:{u['code']}"

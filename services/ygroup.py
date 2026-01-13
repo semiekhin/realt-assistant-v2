@@ -156,13 +156,13 @@ def quarter_to_timestamp(quarter: int, year: int) -> int:
 
 
 def generate_lot_code(lot: Dict, building_number: int) -> str:
-    building_letters = {1: "А", 2: "В", 3: "С", 4: "D", 5: "E"}
+    building_letters = {1: "А", 2: "В", 3: "С", 4: "D", 5: "E", 6: "F"}
     letter = building_letters.get(building_number, "А")
-    lot_name = lot.get("name", "")
+    lot_name = lot.get("name") or ""
     match = re.search(r'\d+', lot_name)
     if match:
         return f"{letter}{match.group()}"
-    return f"{letter}{lot.get('id', 0)}"
+    return f"{letter}{lot.get('id', 'X')}"
 
 
 def transform_facility(facility: Dict) -> Dict:
@@ -177,6 +177,14 @@ def transform_facility(facility: Dict) -> Dict:
         "main_image_url": facility.get("facility_main_image"),
         "lots_count": facility.get("active_lots_amount", 0),
         "min_price": facility.get("min_total_price"),
+        "commission_percent": facility.get("commission_percent"),
+        "commissioning_year": facility.get("commissioning_year"),
+        "commissioning_quarter": facility.get("commissioning_quarter"),
+        "is_commissioned": 1 if facility.get("is_commissioned") else 0,
+        "fz214": 1 if facility.get("fz214") else 0,
+        "min_area_m2": facility.get("min_area_m2"),
+        "max_area_m2": facility.get("max_area_m2"),
+        "min_price_per_m2": facility.get("min_price_per_m2"),
     }
 
 
@@ -210,7 +218,13 @@ def transform_lot(lot: Dict, property_id: int, building_id: int, building_number
     layout_url = None
     layout_images = lot.get("layout_images", [])
     if layout_images:
-        layout_url = layout_images[0]
+        img = layout_images[0]
+        if isinstance(img, str):
+            layout_url = img
+        elif isinstance(img, dict):
+            # Новый формат: {'static_object': {'path': 'url'}}
+            static_obj = img.get("static_object", {})
+            layout_url = static_obj.get("path") or static_obj.get("path_1000px")
     return {
         "property_id": property_id,
         "building_id": building_id,
@@ -224,15 +238,24 @@ def transform_lot(lot: Dict, property_id: int, building_id: int, building_number
         "price_per_m2": lot.get("price_per_m2"),
         "layout_url": layout_url,
         "decoration_type": lot.get("decoration_type"),
-        "status": "available",
+        "status": _map_lot_status(lot.get("status")),
     }
+
+
+def _map_lot_status(status) -> str:
+    """Маппинг статуса лота из YGroup API"""
+    if status == 2:
+        return "booked"
+    elif status == 3:
+        return "sold"
+    return "available"
 
 
 def import_facility(user_id: int, facility_id: str) -> Dict[str, Any]:
     """Импортировать ЖК со всеми корпусами и лотами"""
     from db.database import (
         create_property, create_building, create_unit,
-        update_property_stats, set_property_custom
+        update_property_stats, set_property_custom, get_property_by_ygroup_id
     )
     
     result = {
@@ -242,6 +265,12 @@ def import_facility(user_id: int, facility_id: str) -> Dict[str, Any]:
         "units_count": 0,
         "error": None
     }
+    
+    # 0. Проверка на дубликат
+    existing = get_property_by_ygroup_id(user_id, facility_id)
+    if existing:
+        result["error"] = "Этот ЖК уже добавлен"
+        return result
     
     # 1. Получаем данные ЖК
     facility = get_facility(facility_id)
@@ -284,3 +313,110 @@ def import_facility(user_id: int, facility_id: str) -> Dict[str, Any]:
     print(f"[YGROUP] Imported: {property_data['name']} — {result['buildings_count']} buildings, {result['units_count']} units")
     
     return result
+
+
+# === Справочники ===
+
+FACILITY_CLASS = {
+    1: "Эконом",
+    2: "Комфорт", 
+    3: "Бизнес",
+    4: "Элит",
+    5: "Премиум"
+}
+
+FACILITY_SUBTYPE = {
+    1: "Квартиры",
+    2: "Апартаменты",
+    3: "Таунхаусы",
+    4: "Дуплексы"
+}
+
+TERRITORY_TYPE = {
+    1: "Закрытая",
+    2: "Открытая"
+}
+
+HEATING_TYPE = {
+    1: "Центральное",
+    2: "Автономное",
+    3: "Индивидуальное"
+}
+
+SEWERAGE_TYPE = {
+    1: "Центральная",
+    2: "Автономная",
+    3: "Септик"
+}
+
+WATER_SUPPLY_TYPE = {
+    1: "Центральное",
+    2: "Скважина",
+    3: "Колодец"
+}
+
+PARKING_TYPE = {
+    1: "Подземная",
+    2: "Наземная",
+    3: "Придомовая",
+    4: "Гостевая"
+}
+
+CONTRACT_TYPE = {
+    1: "ДКП",
+    2: "ДДУ",
+    3: "ЖСК"
+}
+
+PAYMENT_METHOD = {
+    1: "100%",
+    2: "Рассрочка",
+    3: "Ипотека"
+}
+
+
+def get_facility_details(facility_id: str) -> Optional[Dict]:
+    """Получить детальную информацию о ЖК (v1 API)"""
+    try:
+        resp = requests.get(
+            f"{API_BASE_V1}/facilities/{facility_id}",
+            headers=get_headers(),
+            timeout=10
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return data.get("data", {}).get("facility")
+    except Exception as e:
+        print(f"[YGROUP] get_facility_details error: {e}")
+        return None
+
+
+def transform_facility_details(f: Dict) -> Dict:
+    """Трансформировать детальные данные ЖК"""
+    # Парковка (список)
+    parking = []
+    for p in f.get("parking_types", []):
+        if p in PARKING_TYPE:
+            parking.append(PARKING_TYPE[p])
+    
+    # Способы оплаты
+    payments = []
+    for p in f.get("payment_methods", []):
+        if p in PAYMENT_METHOD:
+            payments.append(PAYMENT_METHOD[p])
+    
+    return {
+        "description": f.get("description", ""),
+        "address": f.get("address", ""),
+        "facility_class": FACILITY_CLASS.get(f.get("class"), ""),
+        "facility_subtype": FACILITY_SUBTYPE.get(f.get("subtype"), ""),
+        "territory_type": TERRITORY_TYPE.get(f.get("territory_type"), ""),
+        "has_gas": 1 if f.get("has_gas") else 0,
+        "has_electricity": 1 if f.get("has_electricity") else 0,
+        "heating_type": HEATING_TYPE.get(f.get("heating_type"), ""),
+        "sewerage_type": SEWERAGE_TYPE.get(f.get("sewerage_type"), ""),
+        "water_supply_type": WATER_SUPPLY_TYPE.get(f.get("water_supply_type"), ""),
+        "parking_types": ", ".join(parking) if parking else "",
+        "contract_type": CONTRACT_TYPE.get(f.get("contract_type"), ""),
+        "payment_methods": ", ".join(payments) if payments else "",
+    }

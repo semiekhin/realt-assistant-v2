@@ -484,3 +484,16 @@ def set_property_custom(property_id: int, data: Dict):
 
 # Инициализация при импорте
 init_db()
+
+
+def get_property_by_ygroup_id(user_id: int, ygroup_facility_id: str) -> Optional[Dict]:
+    """Проверить есть ли ЖК у пользователя"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT * FROM properties WHERE user_id = ? AND ygroup_facility_id = ?",
+        (user_id, ygroup_facility_id)
+    )
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else None
